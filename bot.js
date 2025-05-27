@@ -4,49 +4,128 @@ const { exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
-// Token API Telegram
+// Konfigurasi
 const TELEGRAM_TOKEN = "7853944509:AAETHjt8CCe9FE0epcXPE14LBj3KM3A7kGY";
-const BOT_USERNAME = "@GotenDownlod_bot"; // Ganti dengan username bot kamu
+const BOT_USERNAME = "@GotenDownlod_bot";
+const ADMIN_ID = 7523981926;
+const DONASI_LINK = "https://t.me/ModuleGoten/224";
+const MAX_LIMIT = 10;
 
-// Inisialisasi bot Telegram
+// Inisialisasi bot dan express
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
-
-// Inisialisasi Express.js
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Folder untuk menyimpan video
-const DOWNLOAD_FOLDER = "/storage/emulated/0/Download/Telegram/vdan";
+// Deteksi environment untuk lokasi download
+function getDownloadFolder() {
+  const androidFolder = "/storage/emulated/0/Download/Telegram";
+  if (fs.existsSync(androidFolder)) return androidFolder;
+  return "D:\\Users\\Administrator\\source\\repos\\video-downloader";
+}
+const DOWNLOAD_FOLDER = getDownloadFolder();
+if (!fs.existsSync(DOWNLOAD_FOLDER)) fs.mkdirSync(DOWNLOAD_FOLDER, { recursive: true });
 
-// Buat folder download jika belum ada
-if (!fs.existsSync(DOWNLOAD_FOLDER)) {
-  fs.mkdirSync(DOWNLOAD_FOLDER, { recursive: true });
-  console.log(`Folder 'vdan' berhasil dibuat di ${DOWNLOAD_FOLDER}`);
-} else {
-  console.log(`Folder 'vdan' sudah ada di ${DOWNLOAD_FOLDER}`);
+// Data user premium & log harian
+let premiumUsers = new Set();
+let dailyLog = {};
+let dailyLimit = {};
+let groupLimit = {};
+let groupLog = {};
+let userSelections = {};
+
+// Load premium dari file jika ada
+const PREMIUM_FILE = "premium-users.json";
+function savePremium() {
+  fs.writeFileSync(PREMIUM_FILE, JSON.stringify([...premiumUsers]), "utf8");
+}
+function loadPremium() {
+  if (fs.existsSync(PREMIUM_FILE)) {
+    try {
+      premiumUsers = new Set(JSON.parse(fs.readFileSync(PREMIUM_FILE, "utf8")));
+    } catch {}
+  }
+}
+loadPremium();
+
+// Reset limit setiap hari
+setInterval(() => {
+  dailyLog = {};
+  dailyLimit = {};
+  groupLimit = {};
+  groupLog = {};
+}, 1000 * 60 * 60 * 24);
+
+// Fungsi log ke admin tanpa spam
+function logUserToAdmin(user, chat, isGroup) {
+  const idStr = isGroup ? `${chat.id}_${user.id}` : user.id;
+  const logObj = isGroup ? groupLog : dailyLog;
+  const tanggal = new Date().toISOString().slice(0, 10);
+
+  if (logObj[idStr] !== tanggal) {
+    logObj[idStr] = tanggal;
+    let info = isGroup
+      ? `👥 Grup: ${chat.title || chat.id}\nID Grup: ${chat.id}\nUser: @${user.username || "-"}\nID User: ${user.id}`
+      : `🙍‍♂️ User: @${user.username || "-"}\nID User: ${user.id}`;
+    bot.sendMessage(ADMIN_ID, `📥 Bot digunakan oleh:\n${info}\nTanggal: ${tanggal}`);
+  }
 }
 
-// Objek untuk menyimpan URL dan jenis unduhan sementara
-const userSelections = {};
-
-// Endpoint untuk mengecek server Express.js
+// Endpoint Express
 app.get("/", (req, res) => {
-  res.send("Server untuk bot Telegram Video Downloader berjalan!");
+  res.send(`
+    <h2>Server untuk bot Telegram Video Downloader berjalan!</h2>
+    <p>
+      Jika menemukan bug harap laporkan ke Admin.<br>
+      Jika bot tiba-tiba mati, tunggu Admin update saja, mohon bersabar.<br>
+      <b>Admin:</b> <a href="https://t.me/gotenbest">https://t.me/gotenbest</a>
+    </p>
+  `);
 });
 
-// Perintah Telegram untuk memulai bot
+// Command admin untuk mengatur premium
+bot.onText(/^\/addpremium (\d+)$/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const userId = parseInt(match[1]);
+  premiumUsers.add(userId);
+  savePremium();
+  bot.sendMessage(msg.chat.id, `✅ User ID ${userId} sekarang menjadi premium.`);
+});
+bot.onText(/^\/removepremium (\d+)$/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const userId = parseInt(match[1]);
+  premiumUsers.delete(userId);
+  savePremium();
+  bot.sendMessage(msg.chat.id, `❌ User ID ${userId} dihapus dari premium.`);
+});
+bot.onText(/^\/listpremium$/, (msg) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  if (premiumUsers.size === 0) return bot.sendMessage(msg.chat.id, "Belum ada user premium.");
+  bot.sendMessage(msg.chat.id, "Daftar user premium:\n" + [...premiumUsers].join("\n"));
+});
+bot.onText(/^\/resetlimit (\d+)$/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const userId = match[1];
+  dailyLimit[userId] = 0;
+  bot.sendMessage(msg.chat.id, `Limit user ID ${userId} direset.`);
+});
+
+// Welcome & info
 bot.onText(/\/start/, (msg) => {
-  console.log(`Pesan '/start' diterima dari pengguna @${msg.chat.username || "tidak diketahui"}`);
   bot.sendMessage(
     msg.chat.id,
-    `🇮🇩 *Selamat datang di GoDownload YT!* 🎥\n\n🚀 Kirim link YouTube favoritmu, dan Gue akan bantu kamu download jadi *MP4 (Video)* atau *MP3 (Audio)*. Simpel dan cepat! Boss 😎`,
+    `🇮🇩 *Selamat datang di GoDownload YT!*\n\n` +
+    `• Download YouTube *MP3/MP4*, siap putar di Telegram Android, PC, dan web.\n` +
+    `• Limit download: *${MAX_LIMIT}x per hari* per user (audio/video).\n\n` +
+    `*Ingin unlimited?* Admin bisa tambah premium pakai command:\n` +
+    "`/addpremium <user_id>`\n\n" +
+    `*Jika menemukan bug harap laporkan ke Admin.*\n*Jika bot tiba-tiba mati, tunggu Admin update saja, mohon bersabar.*\n\nAdmin: @gotenbest`,
     {
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
           [
             { text: "👨‍💻 Developer", url: "https://t.me/gotenbest" },
-            { text: "💰 Donasi", url: "https://t.me/ModuleGoten/224" },
+            { text: "💰 Donasi", url: DONASI_LINK },
           ],
         ],
       },
@@ -54,21 +133,38 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
-// Auto-deteksi link YouTube di grup atau privat chat
+// Pesan masuk (deteksi link Youtube & log user)
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
+  const userId = msg.from.id;
   const text = msg.text;
+  const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
 
-  // Abaikan jika pesan bukan teks
+  // Log user ke admin
+  logUserToAdmin(msg.from, msg.chat, isGroup);
+
   if (!text) return;
 
-  console.log(`Pesan diterima dari @${msg.chat.username || "tidak diketahui"}: ${text}`);
-
-  // Periksa apakah teks adalah URL YouTube
   if (text.match(/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/)) {
-    userSelections[chatId] = { url: text };
+    // Limit check (private)
+    if (!isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) {
+      if (!dailyLimit[userId]) dailyLimit[userId] = 0;
+      if (dailyLimit[userId] >= MAX_LIMIT) {
+        return bot.sendMessage(chatId,
+          `❗️ Limit download harian anda sudah habis (maksimal ${MAX_LIMIT}x/hari).\n\nIngin limit lebih besar? Silakan donasi:\n${DONASI_LINK}`);
+      }
+    }
+    // Limit check (grup)
+    if (isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) {
+      const key = `${chatId}_${userId}`;
+      if (!groupLimit[key]) groupLimit[key] = 0;
+      if (groupLimit[key] >= MAX_LIMIT) {
+        return bot.sendMessage(chatId,
+          `❗️ Limit download harian anda di grup ini sudah habis (maksimal ${MAX_LIMIT}x/hari).\n\nIngin limit lebih besar? Silakan donasi:\n${DONASI_LINK}`);
+      }
+    }
 
-    // Kirim menu pilihan jenis unduhan
+    userSelections[chatId] = { url: text };
     bot.sendMessage(chatId, "🎬 Pilih format unduhan yang kamu mau:", {
       reply_markup: {
         inline_keyboard: [
@@ -79,27 +175,69 @@ bot.on("message", (msg) => {
         ],
       },
     }).then((sentMessage) => {
-      userSelections[chatId].formatMessageId = sentMessage.message_id; // Simpan ID pesan
+      userSelections[chatId].formatMessageId = sentMessage.message_id;
+      setTimeout(() => {
+        bot.deleteMessage(chatId, sentMessage.message_id).catch(() => {});
+      }, 10000);
     });
   }
 });
 
-// Menangani pilihan format unduhan
+// Proses unduhan & increment limit
 bot.on("callback_query", (callbackQuery) => {
   const chatId = callbackQuery.message.chat.id;
+  const userId = callbackQuery.from.id;
   const format = callbackQuery.data;
+  const isGroup = callbackQuery.message.chat.type === "group" || callbackQuery.message.chat.type === "supergroup";
 
-  console.log(`Format dipilih oleh @${callbackQuery.from.username || "tidak diketahui"}: ${format}`);
-
-  // Periksa apakah pengguna telah memberikan URL sebelumnya
   if (!userSelections[chatId] || !userSelections[chatId].url) {
     bot.sendMessage(chatId, "Harap kirim URL video terlebih dahulu.");
     return;
   }
-
   const videoUrl = userSelections[chatId].url;
 
-  // Jika format adalah video, tampilkan menu resolusi
+  // Limit check (private)
+  if (!isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) {
+    if (!dailyLimit[userId]) dailyLimit[userId] = 0;
+    if (dailyLimit[userId] >= MAX_LIMIT) {
+      return bot.sendMessage(chatId,
+        `❗️ Limit download harian anda sudah habis (maksimal ${MAX_LIMIT}x/hari).\n\nIngin limit lebih besar? Silakan donasi:\n${DONASI_LINK}`);
+    }
+  }
+  // Limit check (grup)
+  if (isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) {
+    const key = `${chatId}_${userId}`;
+    if (!groupLimit[key]) groupLimit[key] = 0;
+    if (groupLimit[key] >= MAX_LIMIT) {
+      return bot.sendMessage(chatId,
+        `❗️ Limit download harian anda di grup ini sudah habis (maksimal ${MAX_LIMIT}x/hari).\n\nIngin limit lebih besar? Silakan donasi:\n${DONASI_LINK}`);
+    }
+  }
+
+  function updateLimit() {
+    if (!isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) dailyLimit[userId]++;
+    if (isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) {
+      const key = `${chatId}_${userId}`;
+      groupLimit[key]++;
+    }
+  }
+  function getLimitMsg() {
+    if (!isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId))
+      return `Kamu sudah download ${dailyLimit[userId]}/${MAX_LIMIT} hari ini.`;
+    if (isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) {
+      const key = `${chatId}_${userId}`;
+      return `Kamu sudah download ${groupLimit[key]}/${MAX_LIMIT} di grup ini hari ini.`;
+    }
+    return "Akses premium: tanpa batas!";
+  }
+  function sendTimedMessage(text) {
+    bot.sendMessage(chatId, text).then((sentMsg) => {
+      setTimeout(() => {
+        bot.deleteMessage(chatId, sentMsg.message_id).catch(() => {});
+      }, 10000);
+    });
+  }
+
   if (format === "video") {
     bot.sendMessage(chatId, "🔍 Pilih resolusi video yang ingin diunduh:", {
       reply_markup: {
@@ -116,61 +254,55 @@ bot.on("callback_query", (callbackQuery) => {
       },
     }).then((sentMessage) => {
       if (userSelections[chatId].formatMessageId) {
-        bot.deleteMessage(chatId, userSelections[chatId].formatMessageId); // Hapus pesan format
+        bot.deleteMessage(chatId, userSelections[chatId].formatMessageId).catch(() => {});
       }
-      userSelections[chatId].resolutionMessageId = sentMessage.message_id; // Simpan ID pesan
+      userSelections[chatId].resolutionMessageId = sentMessage.message_id;
+      setTimeout(() => {
+        bot.deleteMessage(chatId, sentMessage.message_id).catch(() => {});
+      }, 10000);
     });
   } else if (format === "audio") {
-    // Format audio MP3
     bot.sendMessage(chatId, `⏳ Sedang mendownload audio MP3, tunggu sebentar ya...`).then((sentMessage) => {
       if (userSelections[chatId].formatMessageId) {
-        bot.deleteMessage(chatId, userSelections[chatId].formatMessageId); // Hapus pesan format
+        bot.deleteMessage(chatId, userSelections[chatId].formatMessageId).catch(() => {});
       }
-      console.log(`Memulai unduhan audio MP3 untuk URL: ${videoUrl}`);
-
-      const command = `yt-dlp -f 'bestaudio[ext=m4a]/bestaudio' --extract-audio --audio-format mp3 -o "${DOWNLOAD_FOLDER}/%(title)s.%(ext)s" ${videoUrl}`;
-
-      exec(command, (error, stdout, stderr) => {
+      const safeTimestamp = Date.now();
+      const outTemplate = path.join(DOWNLOAD_FOLDER, `%(title)s_${safeTimestamp}.mp3`);
+      const command = `yt-dlp -f "bestaudio[ext=m4a]/bestaudio" --extract-audio --audio-format mp3 --audio-quality 192K -o "${outTemplate}" "${videoUrl}"`;
+      exec(command, (error) => {
         if (error) {
-          console.error("Error downloading audio:", error);
-          bot.editMessageText("❌ Gagal mendownload audio.", {
+          bot.editMessageText("❌ Gagal mendownload audio. Coba beberapa menit lagi atau cek link YouTube kamu.", {
             chat_id: chatId,
             message_id: sentMessage.message_id,
           });
           return;
         }
-
-        console.log("Download selesai:", stdout);
-
-        // Cari file hasil download
-        const files = fs.readdirSync(DOWNLOAD_FOLDER);
-        const downloadedFile = files.find((file) => file.endsWith(".mp3")); // Ambil file dengan format MP3
-
-        if (!downloadedFile) {
-          bot.editMessageText("❌ Gagal menemukan file yang didownload.", {
+        const files = fs.readdirSync(DOWNLOAD_FOLDER)
+          .filter((file) => file.endsWith(".mp3"))
+          .map((file) => ({
+            file,
+            time: fs.statSync(path.join(DOWNLOAD_FOLDER, file)).mtime.getTime(),
+          }))
+          .sort((a, b) => b.time - a.time);
+        if (!files.length) {
+          bot.editMessageText("❌ Gagal menemukan file audio yang didownload.", {
             chat_id: chatId,
             message_id: sentMessage.message_id,
           });
           return;
         }
-
+        const downloadedFile = files[0].file;
         const filePath = path.join(DOWNLOAD_FOLDER, downloadedFile);
-
-        // Kirim file ke Telegram
         bot
-          .sendDocument(chatId, filePath)
+          .sendAudio(chatId, filePath)
           .then(() => {
-            console.log(
-              `Audio berhasil dikirim ke @${callbackQuery.from.username || "tidak diketahui"}: ${downloadedFile}`
-            );
-            bot.deleteMessage(chatId, sentMessage.message_id); // Hapus pesan status
-            // Hapus file setelah dikirim untuk menghemat ruang
+            sendTimedMessage(`✅ Download audio selesai! ${getLimitMsg()}`);
+            bot.deleteMessage(chatId, sentMessage.message_id).catch(() => {});
             fs.unlinkSync(filePath);
-            console.log(`File ${downloadedFile} telah dihapus dari folder 'vdan'`);
+            updateLimit();
           })
           .catch((err) => {
-            console.error("Error sending file:", err);
-            bot.editMessageText("❌ Gagal mengirim file.", {
+            bot.editMessageText("❌ Gagal mengirim file ke Telegram.", {
               chat_id: chatId,
               message_id: sentMessage.message_id,
             });
@@ -178,57 +310,48 @@ bot.on("callback_query", (callbackQuery) => {
       });
     });
   } else {
-    // Jika format adalah resolusi video
     const resolution = format;
     bot.sendMessage(chatId, `⏳ Sedang mendownload video dengan resolusi ${resolution}p, tunggu sebentar ya...`).then((sentMessage) => {
       if (userSelections[chatId].resolutionMessageId) {
-        bot.deleteMessage(chatId, userSelections[chatId].resolutionMessageId); // Hapus pesan resolusi
+        bot.deleteMessage(chatId, userSelections[chatId].resolutionMessageId).catch(() => {});
       }
-      console.log(`Memulai unduhan video untuk URL: ${videoUrl} dengan resolusi ${resolution}p`);
-
-      const command = `yt-dlp -f 'bestvideo[ext=mp4][height<=${resolution}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${resolution}]' --merge-output-format mp4 -o "${DOWNLOAD_FOLDER}/%(title)s.%(ext)s" ${videoUrl}`;
-
-      exec(command, (error, stdout, stderr) => {
+      const safeTimestamp = Date.now();
+      const outTemplate = path.join(DOWNLOAD_FOLDER, `%(title)s_${safeTimestamp}.mp4`);
+      const command = `yt-dlp -f "bestvideo[ext=mp4][height<=${resolution}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${resolution}]" --merge-output-format mp4 -o "${outTemplate}" "${videoUrl}"`;
+      exec(command, (error) => {
         if (error) {
-          console.error("Error downloading video:", error);
           bot.editMessageText("❌ Gagal mendownload video.", {
             chat_id: chatId,
             message_id: sentMessage.message_id,
           });
           return;
         }
-
-        console.log("Download selesai:", stdout);
-
-        // Cari file hasil download
-        const files = fs.readdirSync(DOWNLOAD_FOLDER);
-        const downloadedFile = files.find((file) => file.endsWith(".mp4")); // Ambil file dengan format MP4
-
-        if (!downloadedFile) {
-          bot.editMessageText("❌ Gagal menemukan file yang didownload.", {
+        const files = fs.readdirSync(DOWNLOAD_FOLDER)
+          .filter((file) => file.endsWith(".mp4"))
+          .map((file) => ({
+            file,
+            time: fs.statSync(path.join(DOWNLOAD_FOLDER, file)).mtime.getTime(),
+          }))
+          .sort((a, b) => b.time - a.time);
+        if (!files.length) {
+          bot.editMessageText("❌ Gagal menemukan file video yang didownload.", {
             chat_id: chatId,
             message_id: sentMessage.message_id,
           });
           return;
         }
-
+        const downloadedFile = files[0].file;
         const filePath = path.join(DOWNLOAD_FOLDER, downloadedFile);
-
-        // Kirim file ke Telegram
         bot
           .sendDocument(chatId, filePath)
           .then(() => {
-            console.log(
-              `Video berhasil dikirim ke @${callbackQuery.from.username || "tidak diketahui"}: ${downloadedFile}`
-            );
-            bot.deleteMessage(chatId, sentMessage.message_id); // Hapus pesan status
-            // Hapus file setelah dikirim untuk menghemat ruang
+            sendTimedMessage(`✅ Download video selesai! ${getLimitMsg()}`);
+            bot.deleteMessage(chatId, sentMessage.message_id).catch(() => {});
             fs.unlinkSync(filePath);
-            console.log(`File ${downloadedFile} telah dihapus dari folder 'vdan'`);
+            updateLimit();
           })
           .catch((err) => {
-            console.error("Error sending file:", err);
-            bot.editMessageText("❌ Gagal mengirim file.", {
+            bot.editMessageText("❌ Gagal mengirim file ke Telegram.", {
               chat_id: chatId,
               message_id: sentMessage.message_id,
             });
@@ -238,7 +361,6 @@ bot.on("callback_query", (callbackQuery) => {
   }
 });
 
-// Jalankan server Express.js
 app.listen(PORT, () => {
   console.log(`Server berjalan di http://localhost:${PORT}`);
   console.log(`Bot Telegram ${BOT_USERNAME} berhasil dijalankan.`);
