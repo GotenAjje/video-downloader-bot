@@ -1,15 +1,17 @@
+require('dotenv').config(); // <--- Tambahkan ini untuk membaca .env
+
 const TelegramBot = require("node-telegram-bot-api");
 const express = require("express");
 const { exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
-// Konfigurasi
-const TELEGRAM_TOKEN = "7853944509:AAETHjt8CCe9FE0epcXPE14LBj3KM3A7kGY";
-const BOT_USERNAME = "@GotenDownlod_bot";
-const ADMIN_ID = 7523981926;
-const DONASI_LINK = "https://t.me/ModuleGoten/224";
-const MAX_LIMIT = 10;
+// Konfigurasi dari .env
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const BOT_USERNAME = process.env.BOT_USERNAME || "@GotenDownlod_bot";
+const ADMIN_ID = Number(process.env.ADMIN_ID || 0);
+const DONASI_LINK = process.env.DONASI_LINK || "https://t.me/ModuleGoten/224";
+const MAX_LIMIT = Number(process.env.MAX_LIMIT || 10);
 
 // Inisialisasi bot dan express
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
@@ -136,16 +138,6 @@ bot.onText(/\/start/, (msg) => {
 // Helper: membatasi nama file agar aman
 function sanitizeFilename(name) {
   return name.replace(/[\\/:*?"<>|]/g, '').slice(0, 60);
-}
-
-// Helper: cek size file
-function getFileSizeMB(filePath) {
-  try {
-    const stats = fs.statSync(filePath);
-    return stats.size / (1024 * 1024);
-  } catch {
-    return 0;
-  }
 }
 
 // Pesan masuk (deteksi link Youtube)
@@ -299,15 +291,7 @@ bot.on("callback_query", (callbackQuery) => {
           });
           return;
         }
-        const fileSize = getFileSizeMB(outputFile);
-        if (fileSize > 20) {
-          bot.editMessageText("❌ File audio terlalu besar (>20MB) dan tidak bisa dikirim oleh Telegram bot.\nSilakan pilih video berdurasi lebih pendek atau gunakan kualitas audio lebih rendah.", {
-            chat_id: chatId,
-            message_id: sentMessage.message_id,
-          });
-          fs.unlinkSync(outputFile);
-          return;
-        }
+        // Tidak ada limit size, langsung kirim
         bot
           .sendAudio(chatId, outputFile)
           .then(() => {
@@ -350,15 +334,7 @@ bot.on("callback_query", (callbackQuery) => {
           });
           return;
         }
-        const fileSize = getFileSizeMB(outputFile);
-        if (fileSize > 49) {
-          bot.editMessageText("❌ File video terlalu besar (>50MB) dan tidak bisa dikirim oleh bot Telegram.\nSilakan pilih resolusi lebih rendah atau video berdurasi lebih pendek.", {
-            chat_id: chatId,
-            message_id: sentMessage.message_id,
-          });
-          fs.unlinkSync(outputFile);
-          return;
-        }
+        // Tidak ada limit size, langsung kirim
         bot
           .sendDocument(chatId, outputFile)
           .then(() => {
