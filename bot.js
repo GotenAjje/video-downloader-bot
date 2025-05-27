@@ -55,8 +55,9 @@ setInterval(() => {
   groupLog = {};
 }, 1000 * 60 * 60 * 24);
 
-// Fungsi log ke admin tanpa spam
+// Fungsi log ke admin TANPA SPAM
 function logUserToAdmin(user, chat, isGroup) {
+  // HANYA log jika benar-benar menggunakan bot (yaitu mengirim link YouTube)
   const idStr = isGroup ? `${chat.id}_${user.id}` : user.id;
   const logObj = isGroup ? groupLog : dailyLog;
   const tanggal = new Date().toISOString().slice(0, 10);
@@ -133,19 +134,19 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
-// Pesan masuk (deteksi link Youtube & log user)
+// Pesan masuk (deteksi link Youtube)
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
   const text = msg.text;
   const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
 
-  // Log user ke admin
-  logUserToAdmin(msg.from, msg.chat, isGroup);
-
   if (!text) return;
 
   if (text.match(/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/)) {
+    // Log user ke admin HANYA JIKA mengirim link YouTube
+    logUserToAdmin(msg.from, msg.chat, isGroup);
+
     // Limit check (private)
     if (!isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) {
       if (!dailyLimit[userId]) dailyLimit[userId] = 0;
@@ -214,6 +215,7 @@ bot.on("callback_query", (callbackQuery) => {
     }
   }
 
+  // Hitung limit setelah sukses
   function updateLimit() {
     if (!isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) dailyLimit[userId]++;
     if (isGroup && userId !== ADMIN_ID && !premiumUsers.has(userId)) {
@@ -230,6 +232,8 @@ bot.on("callback_query", (callbackQuery) => {
     }
     return "Akses premium: tanpa batas!";
   }
+
+  // Fungsi untuk mengirim notifikasi selesai download dan auto hapus setelah 10 detik
   function sendTimedMessage(text) {
     bot.sendMessage(chatId, text).then((sentMsg) => {
       setTimeout(() => {
@@ -238,6 +242,7 @@ bot.on("callback_query", (callbackQuery) => {
     });
   }
 
+  // Proses format video/audio
   if (format === "video") {
     bot.sendMessage(chatId, "🔍 Pilih resolusi video yang ingin diunduh:", {
       reply_markup: {
@@ -254,17 +259,17 @@ bot.on("callback_query", (callbackQuery) => {
       },
     }).then((sentMessage) => {
       if (userSelections[chatId].formatMessageId) {
-        bot.deleteMessage(chatId, userSelections[chatId].formatMessageId).catch(() => {});
+        bot.deleteMessage(chatId, userSelections[chatId].formatMessageId).catch(()=>{});
       }
       userSelections[chatId].resolutionMessageId = sentMessage.message_id;
       setTimeout(() => {
-        bot.deleteMessage(chatId, sentMessage.message_id).catch(() => {});
+        bot.deleteMessage(chatId, sentMessage.message_id).catch(()=>{});
       }, 10000);
     });
   } else if (format === "audio") {
     bot.sendMessage(chatId, `⏳ Sedang mendownload audio MP3, tunggu sebentar ya...`).then((sentMessage) => {
       if (userSelections[chatId].formatMessageId) {
-        bot.deleteMessage(chatId, userSelections[chatId].formatMessageId).catch(() => {});
+        bot.deleteMessage(chatId, userSelections[chatId].formatMessageId).catch(()=>{});
       }
       const safeTimestamp = Date.now();
       const outTemplate = path.join(DOWNLOAD_FOLDER, `%(title)s_${safeTimestamp}.mp3`);
@@ -297,7 +302,7 @@ bot.on("callback_query", (callbackQuery) => {
           .sendAudio(chatId, filePath)
           .then(() => {
             sendTimedMessage(`✅ Download audio selesai! ${getLimitMsg()}`);
-            bot.deleteMessage(chatId, sentMessage.message_id).catch(() => {});
+            bot.deleteMessage(chatId, sentMessage.message_id).catch(()=>{});
             fs.unlinkSync(filePath);
             updateLimit();
           })
@@ -313,7 +318,7 @@ bot.on("callback_query", (callbackQuery) => {
     const resolution = format;
     bot.sendMessage(chatId, `⏳ Sedang mendownload video dengan resolusi ${resolution}p, tunggu sebentar ya...`).then((sentMessage) => {
       if (userSelections[chatId].resolutionMessageId) {
-        bot.deleteMessage(chatId, userSelections[chatId].resolutionMessageId).catch(() => {});
+        bot.deleteMessage(chatId, userSelections[chatId].resolutionMessageId).catch(()=>{});
       }
       const safeTimestamp = Date.now();
       const outTemplate = path.join(DOWNLOAD_FOLDER, `%(title)s_${safeTimestamp}.mp4`);
@@ -346,7 +351,7 @@ bot.on("callback_query", (callbackQuery) => {
           .sendDocument(chatId, filePath)
           .then(() => {
             sendTimedMessage(`✅ Download video selesai! ${getLimitMsg()}`);
-            bot.deleteMessage(chatId, sentMessage.message_id).catch(() => {});
+            bot.deleteMessage(chatId, sentMessage.message_id).catch(()=>{});
             fs.unlinkSync(filePath);
             updateLimit();
           })
